@@ -1,0 +1,28 @@
+{
+  "name": "@vybra/passport",
+  "version": "1.0.0",
+  "description": "Shared Vybra passport utilities for identity payloads, avatars, QR codes, and cross-surface links.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "tsup": "^8.0.2",
+    "typescript": "^5.0.0"
+  }
+}
