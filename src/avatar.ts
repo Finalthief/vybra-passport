@@ -19,7 +19,7 @@ function deriveColor(seed: number, salt: number): string {
   value = Math.imul(value, 0x85ebca6b) >>> 0;
   value ^= value >>> 13;
   value = Math.imul(value, 0xc2b2ae35) >>> 0;
-  value ^= value >>> 16;
+  value = (value ^ (value >>> 16)) >>> 0;
   return `#${value.toString(16).padStart(8, '0').slice(0, 6)}`;
 }
 
