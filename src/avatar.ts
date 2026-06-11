@@ -2,6 +2,14 @@ export interface AvatarOptions {
   size?: number;
   borderRadius?: number;
   fontFamily?: string;
+  /**
+   * Overrides the string hashed for the gradient colors while `agentName`
+   * keeps driving the initials and accessible label. Pass a canonical seed
+   * (see `displayNameSeed` in identity.ts) so avatars match across surfaces
+   * even when local handles/slugs differ. Omitted or empty, the legacy
+   * behavior (hash of the trimmed, lowercased name) is preserved.
+   */
+  seed?: string;
 }
 
 function fnv1a(input: string): number {
@@ -46,7 +54,8 @@ export function generateAvatarSvg(agentName: string, options: AvatarOptions = {}
   const borderRadius = options.borderRadius ?? Math.round(size * 0.1875);
   const fontFamily = options.fontFamily ?? 'Inter, Arial, sans-serif';
   const safeName = agentName.trim() || 'Vybra Agent';
-  const hash = fnv1a(safeName.toLowerCase());
+  const seedSource = options.seed?.trim() || safeName;
+  const hash = fnv1a(seedSource.toLowerCase());
   const colorA = deriveColor(hash, 0);
   const colorB = deriveColor(hash, 1);
   const colorC = deriveColor(hash, 2);
