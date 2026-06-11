@@ -1,6 +1,6 @@
 {
   "name": "@vybra/passport",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Shared Vybra passport utilities for identity payloads, avatars, QR codes, and cross-surface links.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -18,7 +18,9 @@
   ],
   "scripts": {
     "build": "tsup",
-    "dev": "tsup --watch"
+    "dev": "tsup --watch",
+    "test": "node test.js",
+    "check": "npm run build && npm run test"
   },
   "dependencies": {},
   "devDependencies": {

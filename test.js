@@ -12,6 +12,27 @@ import {
   isAttestationFresh,
   buildSurfaceLinks,
   buildCollectiveAgentUrl,
+  // identity hardening (v1.1.0)
+  canonicalSlug,
+  isCanonicalSlug,
+  isLegacyHandle,
+  normalizeDisplayName,
+  displayNameSeed,
+  handlesMatch,
+  migrateLegacyHandle,
+  legacyHandleCandidates,
+  planHandleMigration,
+  identityFingerprint,
+  avatarSeed,
+  generatePassportAvatarSvg,
+  generatePassportAvatarDataUrl,
+  passportQrValue,
+  generatePassportQrSvg,
+  checkPassportConsistency,
+  normalizePassportHandles,
+  upgradePassportPayload,
+  sha256Hex,
+  MIN_SUPPORTED_PASSPORT_VERSION,
 } from './dist/index.js';
 
 let passed = 0;
@@ -172,6 +193,287 @@ assert(beatsLink.url.includes('vybrabeats.com'), 'beats URL correct');
 const collectiveUrl = buildCollectiveAgentUrl('iris-hart');
 assert(collectiveUrl.includes('agents/iris-hart'), 'collective URL includes agent path');
 assert(collectiveUrl.includes('/agents/'), 'collective URL has /agents/ path');
+
+// --- Canonical slugs ---
+header('Canonical Slugs');
+
+assert(canonicalSlug('Iris_Hart') === 'iris-hart', 'Iris_Hart -> iris-hart');
+assert(canonicalSlug('Iris Hart') === 'iris-hart', 'Iris Hart -> iris-hart');
+assert(canonicalSlug('iris-hart') === 'iris-hart', 'canonical slug unchanged');
+assert(canonicalSlug(' IRIS__HART ') === 'iris-hart', 'case/underscore/whitespace normalized');
+assert(canonicalSlug('Ìris Härt') === 'iris-hart', 'diacritics stripped');
+assert(canonicalSlug('iris--hart') === 'iris-hart', 'hyphen runs collapsed');
+assert(canonicalSlug('') === '', 'empty input -> empty slug');
+assert(canonicalSlug('@@@') === '', 'unsluggable input -> empty slug');
+assert(canonicalSlug(null) === '', 'null input -> empty slug');
+
+assert(isCanonicalSlug('iris-hart'), 'iris-hart is canonical');
+assert(!isCanonicalSlug('Iris_Hart'), 'Iris_Hart is not canonical');
+assert(!isCanonicalSlug('iris--hart'), 'double hyphen is not canonical');
+assert(!isCanonicalSlug('-iris'), 'leading hyphen is not canonical');
+assert(!isCanonicalSlug(''), 'empty is not canonical');
+
+assert(isLegacyHandle('Iris_Hart'), 'Iris_Hart is a legacy handle');
+assert(!isLegacyHandle('iris-hart'), 'canonical slug is not legacy');
+assert(!isLegacyHandle('@@@'), 'unsluggable input is not legacy');
+
+// --- Display-name seed ---
+header('Display-Name Seed');
+
+assert(displayNameSeed('Iris Hart') === 'iris hart', 'display name -> seed');
+assert(displayNameSeed('Iris_Hart') === 'iris hart', 'legacy slug -> same seed');
+assert(displayNameSeed('iris-hart') === 'iris hart', 'canonical slug -> same seed');
+assert(displayNameSeed(' iris   hart ') === 'iris hart', 'whitespace runs collapsed');
+assert(displayNameSeed('') === '', 'empty -> empty seed');
+
+assert(normalizeDisplayName('  Iris   Hart ') === 'Iris Hart', 'display name normalized, case kept');
+
+assert(avatarSeed('Iris_Hart') === 'iris hart', 'avatarSeed from string');
+assert(avatarSeed({ displayName: 'Iris Hart' }) === 'iris hart', 'avatarSeed from identity object');
+
+// --- Handle matching + migration ---
+header('Handle Matching & Migration');
+
+assert(handlesMatch('Iris_Hart', 'iris-hart'), 'legacy and canonical match');
+assert(handlesMatch('IRIS HART', 'iris-hart'), 'spaced/upper matches canonical');
+assert(!handlesMatch('iris-hart', 'bert'), 'different identities do not match');
+assert(!handlesMatch('', ''), 'empty handles never match');
+
+const migration = migrateLegacyHandle('Iris_Hart');
+assert(migration.to === 'iris-hart', 'migrateLegacyHandle canonicalizes');
+assert(migration.changed === true, 'migration flagged as changed');
+assert(migrateLegacyHandle('iris-hart').changed === false, 'canonical input unchanged');
+
+const candidates = legacyHandleCandidates('iris-hart');
+assert(candidates[0] === 'iris-hart', 'original input is first candidate');
+assert(candidates.includes('Iris_Hart'), 'candidates include Title_Case underscore variant');
+assert(candidates.includes('iris_hart'), 'candidates include lowercase underscore variant');
+assert(candidates.includes('Iris Hart'), 'candidates include display-name variant');
+assert(candidates.includes('irishart'), 'candidates include collapsed variant');
+assert(new Set(candidates).size === candidates.length, 'candidates are deduplicated');
+
+const safePlan = planHandleMigration(['Iris_Hart', 'Bert']);
+assert(safePlan.safe === true, 'distinct identities migrate safely');
+assert(safePlan.changed.length === 2, 'both legacy handles flagged as changed');
+assert(safePlan.migrations.find((m) => m.from === 'Iris_Hart').to === 'iris-hart', 'plan maps Iris_Hart');
+
+const collisionPlan = planHandleMigration(['Iris_Hart', 'iris-hart']);
+assert(collisionPlan.safe === false, 'collision detected');
+assert(collisionPlan.collisions.length === 1, 'one collision reported');
+assert(collisionPlan.collisions[0].canonical === 'iris-hart', 'collision canonical is iris-hart');
+assert(collisionPlan.collisions[0].sources.length === 2, 'collision lists both sources');
+
+const invalidPlan = planHandleMigration(['___', 'iris-hart']);
+assert(invalidPlan.safe === false, 'invalid handle makes plan unsafe');
+assert(invalidPlan.invalid.includes('___'), 'invalid handle reported');
+
+// --- Identity fingerprint ---
+header('Identity Fingerprint');
+
+assert(/^[0-9a-f]{64}$/.test(identityFingerprint('Iris Hart')), 'fingerprint is sha256 hex');
+assert(identityFingerprint('Iris Hart') === identityFingerprint('Iris_Hart'), 'variants share a fingerprint');
+assert(identityFingerprint('Iris Hart') !== identityFingerprint('Bert'), 'different identities differ');
+assert(
+  identityFingerprint({ displayName: 'Iris Hart' }) === identityFingerprint('Iris Hart'),
+  'identity object and string agree'
+);
+
+assert(
+  sha256Hex('') === 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+  'sha256Hex empty-string vector'
+);
+assert(
+  sha256Hex('abc') === 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+  'sha256Hex abc vector'
+);
+
+// --- Passport avatar consistency ---
+header('Passport Avatar Consistency');
+
+const stopColors = (s) => (s.match(/stop-color="[^"]+"/g) || []).join(',');
+
+assert(
+  generatePassportAvatarSvg('Iris Hart') === generateAvatarSvg('Iris Hart'),
+  'passport avatar is byte-identical to legacy avatar for plain display names'
+);
+assert(
+  stopColors(generatePassportAvatarSvg('Iris_Hart')) === stopColors(generateAvatarSvg('Iris Hart')),
+  'legacy slug Iris_Hart now yields the display-name gradient'
+);
+assert(
+  stopColors(generatePassportAvatarSvg('iris-hart')) === stopColors(generateAvatarSvg('Iris Hart')),
+  'canonical slug yields the display-name gradient'
+);
+assert(
+  generatePassportAvatarSvg({ displayName: 'Iris Hart' }) === generatePassportAvatarSvg('Iris Hart'),
+  'identity object and string agree'
+);
+assert(
+  generatePassportAvatarDataUrl('Iris Hart').startsWith('data:image/svg+xml;charset=utf-8,'),
+  'passport avatar data URL is valid'
+);
+
+// seed option back-compat
+assert(
+  generateAvatarSvg('Iris Hart', { seed: '' }) === generateAvatarSvg('Iris Hart'),
+  'empty seed falls back to legacy hashing'
+);
+assert(
+  stopColors(generateAvatarSvg('Iris Hart', { seed: 'something-else' })) !==
+    stopColors(generateAvatarSvg('Iris Hart')),
+  'explicit seed overrides gradient hash'
+);
+
+// --- Passport QR consistency ---
+header('Passport QR Consistency');
+
+const qrBase = 'https://vybra.org';
+assert(
+  passportQrValue('Iris_Hart', qrBase) === passportQrValue('iris-hart', qrBase),
+  'legacy and canonical handles encode the same QR value'
+);
+assert(passportQrValue('Iris_Hart', qrBase).includes('/agents/iris-hart/'), 'QR value uses canonical slug');
+assert(
+  passportQrValue({ globalHandle: 'Iris_Hart' }, qrBase) === passportQrValue('iris-hart', qrBase),
+  'identity object and string agree for QR value'
+);
+assert(
+  generatePassportQrSvg('Iris_Hart', qrBase) === generatePassportQrSvg('iris-hart', qrBase),
+  'legacy and canonical handles render identical QR SVGs'
+);
+
+// --- Passport consistency checks ---
+header('Passport Consistency Checks');
+
+assert(checkPassportConsistency(payload).length === 0, 'clean v2 payload has no issues');
+
+const galleryLegacyPayload = {
+  ...payload,
+  surfaces: [
+    ...payload.surfaces,
+    { surface: 'gallery', handle: 'Iris_Hart', status: 'claimed', founding: false },
+  ],
+};
+const galleryIssues = checkPassportConsistency(galleryLegacyPayload);
+assert(
+  galleryIssues.some((i) => i.code === 'legacy_surface_handle' && i.surface === 'gallery'),
+  'gallery Iris_Hart flagged as legacy surface handle'
+);
+assert(galleryIssues.every((i) => i.level !== 'error'), 'legacy gallery handle is a warning, not an error');
+
+const mismatchPayload = {
+  ...payload,
+  surfaces: [
+    ...payload.surfaces,
+    { surface: 'beats', handle: 'totally-different', status: 'claimed', founding: false },
+  ],
+};
+assert(
+  checkPassportConsistency(mismatchPayload).some((i) => i.code === 'surface_handle_mismatch'),
+  'unrelated surface handle flagged as mismatch'
+);
+const hintedPayload = { ...mismatchPayload, handleHints: { beats: 'totally-different' } };
+assert(
+  !checkPassportConsistency(hintedPayload).some((i) => i.code === 'surface_handle_mismatch'),
+  'handleHints entry silences surface mismatch'
+);
+
+assert(
+  checkPassportConsistency({ ...payload, payloadVersion: 99 }).some(
+    (i) => i.code === 'unsupported_payload_version' && i.level === 'error'
+  ),
+  'future payload version is an error'
+);
+assert(
+  checkPassportConsistency({ ...payload, payloadVersion: 1 }).some(
+    (i) => i.code === 'legacy_payload_version' && i.level === 'warning'
+  ),
+  'legacy payload version is a warning'
+);
+assert(
+  checkPassportConsistency({ ...payload, expiresAt: payload.issuedAt }).some(
+    (i) => i.code === 'invalid_validity_window'
+  ),
+  'expiresAt <= issuedAt is an error'
+);
+assert(
+  checkPassportConsistency({
+    ...payload,
+    identity: { ...payload.identity, globalHandle: 'Iris_Hart' },
+  }).some((i) => i.code === 'non_canonical_global_handle'),
+  'non-canonical global handle flagged'
+);
+
+// --- Handle normalization ---
+header('Passport Handle Normalization');
+
+const normalized = normalizePassportHandles(galleryLegacyPayload);
+assert(normalized.changed === true, 'legacy payload is changed by normalization');
+const galleryProfile = normalized.payload.surfaces.find((s) => s.surface === 'gallery');
+assert(galleryProfile.handle === 'iris-hart', 'gallery handle canonicalized');
+assert(normalized.payload.handleHints.gallery === 'Iris_Hart', 'legacy gallery handle preserved in handleHints');
+assert(galleryLegacyPayload.surfaces[1].handle === 'Iris_Hart', 'input payload is not mutated');
+
+const renormalized = normalizePassportHandles(normalized.payload);
+assert(renormalized.changed === false, 'normalization is idempotent');
+
+// normalization invalidates signatures; re-sign restores verifiability
+const signedLegacy = signPassportPayload(galleryLegacyPayload);
+const normalizedSigned = {
+  ...normalizePassportHandles(galleryLegacyPayload).payload,
+  signature: signedLegacy.signature,
+  signatureAlg: signedLegacy.signatureAlg,
+};
+assert(!verifyPassportSignature(normalizedSigned), 'old signature fails on normalized payload');
+const resigned = signPassportPayload(normalizePassportHandles(galleryLegacyPayload).payload);
+assert(verifyPassportSignature(resigned), 're-signed normalized payload verifies');
+
+// --- Legacy payload upgrade ---
+header('Legacy Payload Upgrade');
+
+const v1Payload = {
+  payloadVersion: 1,
+  identity: {
+    id: 'test-id-123',
+    globalHandle: 'iris-hart',
+    email: 'iris@vybra.org',
+    displayName: 'Iris Hart',
+    bio: null,
+  },
+  surfaces: [{ surface: 'collective', handle: 'iris-hart', status: 'claimed', founding: true }],
+  collectiveAgent: { id: 'agent-1', handle: 'iris-hart', keyId: 'key-1', surfaceScope: ['collective'] },
+  issuedAt: payload.issuedAt,
+  expiresAt: payload.expiresAt,
+};
+
+const upgraded = upgradePassportPayload(v1Payload);
+assert(upgraded.payload.payloadVersion === 2, 'upgraded to v2');
+assert(upgraded.upgradedFrom === 1, 'upgradedFrom records v1');
+assert(upgraded.changed === true, 'upgrade flagged as changed');
+assert(typeof upgraded.payload.avatarDataUrl === 'string', 'avatarDataUrl filled');
+assert(typeof upgraded.payload.qrDataUrl === 'string', 'qrDataUrl filled');
+assert(
+  upgraded.payload.handleHints && typeof upgraded.payload.handleHints === 'object',
+  'handleHints filled'
+);
+assert(checkPassportConsistency(upgraded.payload).length === 0, 'upgraded v1 payload passes consistency checks');
+
+const v0Like = { identity: { id: 'x', displayName: 'Iris Hart' } };
+const upgradedV0 = upgradePassportPayload(v0Like);
+assert(upgradedV0.upgradedFrom === 0, 'missing payloadVersion reads as v0');
+assert(upgradedV0.payload.identity.globalHandle === 'iris-hart', 'globalHandle derived from displayName');
+assert(upgradedV0.payload.collectiveAgent.handle === 'iris-hart', 'collectiveAgent handle defaults to globalHandle');
+assert(isPassportExpired(upgradedV0.payload), 'missing timestamps read as expired (safe default)');
+
+let upgradeThrew = false;
+try {
+  upgradePassportPayload(null);
+} catch (error) {
+  upgradeThrew = error instanceof TypeError;
+}
+assert(upgradeThrew, 'upgradePassportPayload rejects non-object input');
+
+assert(MIN_SUPPORTED_PASSPORT_VERSION === 0, 'minimum supported version is 0');
 
 // --- Results ---
 console.log(`\n${'='.repeat(40)}`);

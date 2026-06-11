@@ -235,6 +235,10 @@ export function canonicalJson(value: unknown): string {
   return JSON.stringify(canonicalize(value));
 }
 
+export function sha256Hex(input: string): string {
+  return toHex(sha256(toUtf8Bytes(input)));
+}
+
 export function sanitizeForFederation(input: string | null | undefined): string {
   if (!input) {
     return '';
